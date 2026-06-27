@@ -46,6 +46,11 @@ SymbolData (per asset)            VolatilityTargetSizer (чиста матема
 математика (sizer), а изпълнението на ордери е изолирано от двете. `VolatilityTargetSizer`
 няма QC зависимости → тества се с чисти numpy масиви.
 
+**Deployment бележка:** QuantConnect cloud loader-ът не намира sibling модул (`from sizer import …`
+→ `No module named 'sizer'`). Затова трите класа живеят в един `main.py`. `VolatilityTargetSizer`
+остава с непроменен интерфейс и се внася локално за unit тестове чрез guard
+(`try: QCAlgorithm except NameError: shim`), който в cloud никога не се активира.
+
 **Поток на данни (всеки час):**
 1. `OnData` получава 1H барове → за всеки `SymbolData`:
    - ако в позиция → update `peak_price` + chandelier stop check;

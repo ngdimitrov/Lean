@@ -1,5 +1,5 @@
 import numpy as np
-from sizer import VolatilityTargetSizer
+from main import VolatilityTargetSizer
 
 
 def _approx(a, b, tol=1e-6):
