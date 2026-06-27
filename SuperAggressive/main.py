@@ -133,6 +133,9 @@ class SuperAggressiveTrendSystem(QCAlgorithm):
         self.SetEndDate(2025, 1, 1)
         self.SetCash(100000)
 
+        # Realistic Coinbase fees/fills (cash account, no leverage).
+        self.SetBrokerageModel(BrokerageName.Coinbase, AccountType.Cash)
+
         self.tickers = ["BTCUSD", "ETHUSD", "SOLUSD"]
         self.rebalance_band = 0.05  # no-trade band to curb daily-retarget churn
 
