@@ -126,26 +126,34 @@ class SymbolData:
 
 class SuperAggressiveTrendSystem(QCAlgorithm):
     """1H Donchian breakout + Daily EMA200 regime filter + Chandelier ATR exit,
-    sized by portfolio volatility targeting (60d covariance, ~27.5% annual vol)."""
+    sized by leveraged portfolio volatility targeting (60d covariance, ~100% vol
+    target capped at 2x gross), with weekly re-targeting to keep fees in check."""
 
     def Initialize(self):
         self.SetStartDate(2021, 1, 1)
         self.SetEndDate(2025, 1, 1)
         self.SetCash(100000)
 
-        # Realistic Coinbase fees/fills (cash account, no leverage).
-        self.SetBrokerageModel(BrokerageName.Coinbase, AccountType.Cash)
+        # Coinbase brokerage rejects margin, so we keep the default brokerage model
+        # (which defaults to a Margin account) and apply leverage + realistic Coinbase
+        # fees per security below. Models a leveraged / perp-like scenario, not spot.
 
         self.tickers = ["BTCUSD", "ETHUSD", "SOLUSD"]
-        self.rebalance_band = 0.05  # no-trade band to curb daily-retarget churn
+        self.max_leverage = 2
+        self.rebalance_band = 0.15  # wide no-trade band: turnover/fees are the #1 killer
 
+        # Sane-aggressive: moderate vol target with a 2x gross cap. Fees scale with
+        # notional x turnover, so leverage is held at 2x and rebalances are weekly.
         self.sizer = VolatilityTargetSizer(
-            target_annual_vol=0.275, max_gross_leverage=1.0,
+            target_annual_vol=1.0, max_gross_leverage=float(self.max_leverage),
             periods_per_year=365, min_observations=30)
 
         self.symbol_data = {}
         for ticker in self.tickers:
-            symbol = self.AddCrypto(ticker, Resolution.Hour, Market.GDAX).Symbol
+            security = self.AddCrypto(ticker, Resolution.Hour, Market.GDAX)
+            security.SetBuyingPowerModel(SecurityMarginModel(self.max_leverage))
+            security.SetFeeModel(CoinbaseFeeModel())
+            symbol = security.Symbol
             self.symbol_data[symbol] = SymbolData(self, symbol)
             # Daily bars (for covariance returns) via a native consolidator.
             consolidator = TradeBarConsolidator(timedelta(days=1))
@@ -155,9 +163,10 @@ class SuperAggressiveTrendSystem(QCAlgorithm):
         # Warm up enough days for EMA200 + the 60d covariance window.
         self.SetWarmUp(timedelta(days=210))
 
-        # Daily re-target keeps portfolio vol on target as covariance drifts.
-        self.Schedule.On(self.DateRules.EveryDay(),
-                         self.TimeRules.At(0, 5), self.daily_retarget)
+        # Weekly re-target keeps portfolio vol on target as covariance drifts,
+        # without the heavy daily-rebalance fee drag.
+        self.Schedule.On(self.DateRules.Every(DayOfWeek.Monday),
+                         self.TimeRules.At(0, 5), self.weekly_retarget)
 
     def on_daily_consolidated(self, sender, bar):
         sd = self.symbol_data.get(bar.Symbol)
@@ -192,11 +201,11 @@ class SuperAggressiveTrendSystem(QCAlgorithm):
         if changed:
             self.rebalance("signal-change")
 
-    def daily_retarget(self):
+    def weekly_retarget(self):
         if self.IsWarmingUp:
             return
         if any(sd.active for sd in self.symbol_data.values()):
-            self.rebalance("daily-retarget")
+            self.rebalance("weekly-retarget")
 
     def rebalance(self, reason):
         if self.IsWarmingUp:
